@@ -1,42 +1,10 @@
 const Project = require('../models/Project');
 const googleDriveService = require('../services/googleDriveService');
 const { validationResult } = require('express-validator');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { editorUpload } = require('../middleware/memoryUpload');
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = 'uploads/edited-videos';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 500 * 1024 * 1024 // 500MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /mp4|mov|avi|mkv|wmv|flv|webm/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = file.mimetype.startsWith('video/');
-
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Only video files are allowed'));
-    }
-  }
-});
+// No longer need local storage configuration - using memory upload only
+// Files go directly to Google Drive from memory buffers
 
 /**
  * @desc    Get editor dashboard data
@@ -364,13 +332,22 @@ exports.updateProjectStatus = async (req, res) => {
  * @route   POST /api/editor/projects/:id/upload-version
  * @access  Private (Editor only)
  */
-exports.uploadEditedVersion = [
-  upload.single('video'),
-  async (req, res) => {
-    try {
-      const projectId = req.params.id;
-      const editorId = req.user._id;
-      const { notes } = req.body;
+/**
+ * @desc    Upload edited video version (MEMORY STORAGE - NO LOCAL FILES)
+ * @route   POST /api/editor/projects/:id/upload-version
+ * @access  Private (Editor only)
+ */
+exports.uploadEditedVersion = async (req, res) => {
+  try {
+    // Use memory upload middleware
+    editorUpload.single('video')(req, res, async (err) => {
+      if (err) {
+        console.error('Editor upload error:', err);
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'Video upload error'
+        });
+      }
 
       if (!req.file) {
         return res.status(400).json({
@@ -379,28 +356,30 @@ exports.uploadEditedVersion = [
         });
       }
 
-      const project = await Project.findOne({
-        _id: projectId,
-        assignedEditor: editorId
-      });
-
-      if (!project) {
-        // Clean up uploaded file
-        fs.unlinkSync(req.file.path);
-        return res.status(404).json({
-          success: false,
-          message: 'Project not found or not assigned to you'
-        });
-      }
+      const projectId = req.params.id;
+      const editorId = req.user._id;
+      const { notes } = req.body;
 
       try {
+        const project = await Project.findOne({
+          _id: projectId,
+          assignedEditor: editorId
+        });
+
+        if (!project) {
+          return res.status(404).json({
+            success: false,
+            message: 'Project not found or not assigned to you'
+          });
+        }
+
         // Determine version number
         const latestVersion = project.getLatestVersion();
         const newVersionNumber = latestVersion ? latestVersion.version + 1 : 1;
 
-        // Upload to Google Drive
-        const driveUpload = await googleDriveService.uploadEditedVersion(
-          req.file.path,
+        // Upload to Google Drive from memory buffer
+        const driveUpload = await googleDriveService.uploadEditedVersionFromBuffer(
+          req.file.buffer,
           req.file.originalname,
           project.driveFolderId,
           newVersionNumber
@@ -427,12 +406,11 @@ exports.uploadEditedVersion = [
           notes
         );
 
-        // Clean up local file
-        fs.unlinkSync(req.file.path);
+        // No file cleanup needed - memory storage!
 
         res.status(200).json({
           success: true,
-          message: 'Edited version uploaded successfully',
+          message: 'Edited version uploaded successfully to Google Drive',
           version: {
             number: newVersionNumber,
             filename: req.file.originalname,
@@ -442,31 +420,23 @@ exports.uploadEditedVersion = [
         });
 
       } catch (driveError) {
-        // Clean up local file on error
-        if (fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
+        // No file cleanup needed - memory storage!
         console.error('Drive upload error:', driveError);
         res.status(500).json({
           success: false,
           message: 'Error uploading to Google Drive'
         });
       }
+    });
 
-    } catch (error) {
-      // Clean up local file on error
-      if (req.file && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-      console.error('Upload edited version error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error uploading edited version'
-      });
-    }
+  } catch (error) {
+    console.error('Upload edited version error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error uploading edited version'
+    });
   }
-];
-
+};
 /**
  * @desc    Get project files from Google Drive
  * @route   GET /api/editor/projects/:id/files

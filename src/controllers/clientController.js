@@ -2,49 +2,13 @@ const Project = require('../models/Project');
 const googleDriveService = require('../services/googleDriveService');
 const emailService = require('../services/emailService');
 const { validationResult, body } = require('express-validator');
-const multer = require('multer');
+const { clientUpload, voiceUpload } = require('../middleware/memoryUpload');
 const path = require('path');
-const fs = require('fs');
 
-// Configure multer for client uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = 'uploads/client-media';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
+// Remove fs import and local storage dependencies
 
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 1000 * 1024 * 1024 // 1GB limit for client uploads
-  },
-  fileFilter: (req, file, cb) => {
-    console.log('🔍 File upload attempt:', {
-      originalName: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size
-    });
-    
-    const allowedTypes = /mp4|mov|avi|mkv|wmv|flv|webm|mp3|wav|aac|jpg|jpeg|png|gif|pdf|doc|docx|txt|rtf|zip|rar|7z|srt|ass|vtt/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    
-    if (extname) {
-      console.log('✅ File type accepted:', file.originalname);
-      return cb(null, true);
-    } else {
-      console.log('❌ File type rejected:', file.originalname, 'Extension:', path.extname(file.originalname));
-      cb(new Error(`File type not supported: ${path.extname(file.originalname)}. Please upload video, audio, image, document, or subtitle files.`));
-    }
-  }
-});
+// No longer need local storage configuration - using memory upload only
+// All files go directly to Google Drive from memory buffers
 
 /**
  * @desc    Upload client media and create project
@@ -52,11 +16,11 @@ const upload = multer({
  * @access  Public
  */
 exports.uploadMedia = [
-  // Multer middleware with error handling
+  // Memory-based multer middleware
   (req, res, next) => {
-    upload.array('media', 10)(req, res, (err) => {
+    clientUpload.array('media', 10)(req, res, (err) => {
       if (err) {
-        console.log('❌ Multer error:', err.message);
+        console.log('❌ Memory upload error:', err.message);
         return res.status(400).json({
           success: false,
           message: err.message || 'File upload error',
@@ -99,14 +63,7 @@ exports.uploadMedia = [
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         console.log('❌ Validation errors:', errors.array());
-        // Clean up uploaded files
-        if (req.files) {
-          req.files.forEach(file => {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
-          });
-        }
+        // No file cleanup needed - memory storage!
         return res.status(400).json({
           success: false,
           message: 'Validation failed',
@@ -158,21 +115,20 @@ exports.uploadMedia = [
         project.voiceMessagesFolderId = driveStructure.voiceMessagesFolder.id;
         project.editedVersionsFolderId = driveStructure.editedVersionsFolder.id;
 
-        // Upload files to Google Drive
+        // Upload files to Google Drive from memory buffers
         const uploadPromises = req.files.map(async (file) => {
           try {
-            const driveFile = await googleDriveService.uploadFile(
-              file.path,
+            const driveFile = await googleDriveService.uploadFileFromBuffer(
+              file.buffer,
               file.originalname,
               driveStructure.clientUploadFolder.id,
               file.mimetype
             );
 
-            // Clean up local file
-            fs.unlinkSync(file.path);
+            // No file cleanup needed - memory storage!
 
             return {
-              filename: file.filename,
+              filename: file.originalname,
               originalName: file.originalname,
               size: file.size,
               mimeType: file.mimetype,
@@ -180,10 +136,6 @@ exports.uploadMedia = [
             };
           } catch (uploadError) {
             console.error('Individual file upload error:', uploadError);
-            // Clean up local file
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
             throw uploadError;
           }
         });
@@ -195,12 +147,12 @@ exports.uploadMedia = [
         await project.addTimelineEntry(
           'Project created and media uploaded',
           null,
-          `${uploadedFiles.length} file(s) uploaded`
+          `${uploadedFiles.length} file(s) uploaded directly to Google Drive`
         );
 
         res.status(201).json({
           success: true,
-          message: 'Media uploaded successfully and project created',
+          message: 'Media uploaded successfully to Google Drive and project created',
           project: {
             id: project._id,
             publicId: project.publicId,
@@ -213,14 +165,7 @@ exports.uploadMedia = [
         });
 
       } catch (error) {
-        // Clean up uploaded files on error
-        if (req.files) {
-          req.files.forEach(file => {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
-          });
-        }
+        // No file cleanup needed - memory storage!
         throw error;
       }
 
@@ -243,10 +188,11 @@ exports.uploadMedia = [
  * @access  Public
  */
 exports.uploadEnhanced = [
-  // Configure multer for mixed file types (no restrictions)
+  // Configure memory upload for mixed file types (no local storage)
   (req, res, next) => {
-    const enhancedUpload = multer({
-      storage: storage,
+    const { createMemoryUpload } = require('../middleware/memoryUpload');
+    
+    const enhancedUpload = createMemoryUpload({
       limits: {
         fileSize: 10 * 1024 * 1024 * 1024 // 10GB limit - essentially unlimited
       },
@@ -269,7 +215,7 @@ exports.uploadEnhanced = [
       { name: 'voiceFiles', maxCount: 20 }
     ])(req, res, (err) => {
       if (err) {
-        console.log('❌ Enhanced upload error:', err.message);
+        console.log('❌ Enhanced memory upload error:', err.message);
         return res.status(400).json({
           success: false,
           message: err.message || 'File upload error',
@@ -344,14 +290,7 @@ exports.uploadEnhanced = [
       if (!errors.isEmpty()) {
         console.log('❌ Enhanced validation errors:', errors.array());
         
-        // Clean up uploaded files
-        if (req.files) {
-          Object.values(req.files).flat().forEach(file => {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
-          });
-        }
+        // No file cleanup needed - memory storage!
         
         return res.status(400).json({
           success: false,
@@ -469,21 +408,21 @@ exports.uploadEnhanced = [
 
         const uploadedFiles = [];
 
-        // Upload regular files
+        // Upload regular files from memory
         if (req.files?.files) {
           const regularFilePromises = req.files.files.map(async (file) => {
             try {
-              const driveFile = await googleDriveService.uploadFile(
-                file.path,
+              const driveFile = await googleDriveService.uploadFileFromBuffer(
+                file.buffer,
                 file.originalname,
                 driveStructure.clientUploadFolder.id,
                 file.mimetype
               );
 
-              fs.unlinkSync(file.path);
+              // No file cleanup needed - memory storage!
 
               return {
-                filename: file.filename,
+                filename: file.originalname,
                 originalName: file.originalname,
                 size: file.size,
                 mimeType: file.mimetype,
@@ -492,9 +431,6 @@ exports.uploadEnhanced = [
               };
             } catch (uploadError) {
               console.error('Regular file upload error:', uploadError);
-              if (fs.existsSync(file.path)) {
-                fs.unlinkSync(file.path);
-              }
               throw uploadError;
             }
           });
@@ -503,21 +439,21 @@ exports.uploadEnhanced = [
           uploadedFiles.push(...regularFiles);
         }
 
-        // Upload voice files
+        // Upload voice files from memory
         if (req.files?.voiceFiles) {
           const voiceFilePromises = req.files.voiceFiles.map(async (file) => {
             try {
-              const driveFile = await googleDriveService.uploadFile(
-                file.path,
+              const driveFile = await googleDriveService.uploadFileFromBuffer(
+                file.buffer,
                 file.originalname,
                 driveStructure.voiceFilesFolder.id,
                 file.mimetype
               );
 
-              fs.unlinkSync(file.path);
+              // No file cleanup needed - memory storage!
 
               return {
-                filename: file.filename,
+                filename: file.originalname,
                 originalName: file.originalname,
                 size: file.size,
                 mimeType: file.mimetype,
@@ -526,9 +462,6 @@ exports.uploadEnhanced = [
               };
             } catch (uploadError) {
               console.error('Voice file upload error:', uploadError);
-              if (fs.existsSync(file.path)) {
-                fs.unlinkSync(file.path);
-              }
               throw uploadError;
             }
           });
@@ -587,14 +520,7 @@ exports.uploadEnhanced = [
         });
 
       } catch (error) {
-        // Clean up uploaded files on error
-        if (req.files) {
-          Object.values(req.files).flat().forEach(file => {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
-          });
-        }
+        // No file cleanup needed - memory storage!
         throw error;
       }
 
@@ -1094,12 +1020,12 @@ exports.uploadVoiceMessage = async (req, res) => {
       });
     }
 
-    // Upload voice message to Google Drive
+    // Upload voice message to Google Drive from memory
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `voice-message-${timestamp}.webm`;
     
-    const driveFile = await googleDriveService.uploadVoiceMessage(
-      req.file.path,
+    const driveFile = await googleDriveService.uploadVoiceMessageFromBuffer(
+      req.file.buffer,
       fileName,
       project.voiceMessagesFolderId
     );
@@ -1132,10 +1058,7 @@ exports.uploadVoiceMessage = async (req, res) => {
 
     await project.save();
 
-    // Clean up local file
-    if (fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
+    // No file cleanup needed - memory storage!
 
     res.status(200).json({
       success: true,
@@ -1150,10 +1073,7 @@ exports.uploadVoiceMessage = async (req, res) => {
   } catch (error) {
     console.error('Upload voice message error:', error);
     
-    // Clean up local file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
+    // No file cleanup needed - memory storage!
 
     res.status(500).json({
       success: false,

@@ -4,7 +4,8 @@ const googleDriveService = require('../services/googleDriveService');
 const emailService = require('../services/emailService');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
-const fs = require('fs');
+
+// Remove fs import - no local file storage needed
 
 /**
  * @desc    Get admin dashboard stats
@@ -639,12 +640,12 @@ exports.uploadVoiceMessage = async (req, res) => {
       });
     }
 
-    // Upload voice message to Google Drive
+    // Upload voice message to Google Drive from memory
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `admin-voice-${timestamp}.webm`;
     
-    const driveFile = await googleDriveService.uploadVoiceMessage(
-      req.file.path,
+    const driveFile = await googleDriveService.uploadVoiceMessageFromBuffer(
+      req.file.buffer,
       fileName,
       project.voiceMessagesFolderId
     );
@@ -675,10 +676,7 @@ exports.uploadVoiceMessage = async (req, res) => {
 
     await project.save();
 
-    // Clean up local file
-    if (fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
+    // No file cleanup needed - memory storage!
 
     res.status(200).json({
       success: true,
@@ -693,10 +691,7 @@ exports.uploadVoiceMessage = async (req, res) => {
   } catch (error) {
     console.error('Upload admin voice message error:', error);
     
-    // Clean up local file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
+    // No file cleanup needed - memory storage!
 
     res.status(500).json({
       success: false,

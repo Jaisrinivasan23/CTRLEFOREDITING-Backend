@@ -72,7 +72,41 @@ class GoogleDriveService {
   }
 
   /**
-   * Upload file to Google Drive
+   * Upload file to Google Drive from buffer (no local storage)
+   */
+  async uploadFileFromBuffer(buffer, fileName, folderId, mimeType = null) {
+    try {
+      const fileMetadata = {
+        name: fileName,
+        parents: [folderId]
+      };
+
+      const media = {
+        mimeType: mimeType || 'application/octet-stream',
+        body: buffer
+      };
+
+      const file = await this.drive.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id, name, webViewLink, size'
+      });
+
+      return {
+        id: file.data.id,
+        name: file.data.name,
+        webViewLink: file.data.webViewLink,
+        downloadLink: `https://drive.google.com/uc?id=${file.data.id}`,
+        size: file.data.size
+      };
+    } catch (error) {
+      console.error('Error uploading buffer to Google Drive:', error);
+      throw new Error('Failed to upload file buffer to Google Drive');
+    }
+  }
+
+  /**
+   * Upload file to Google Drive (backward compatibility)
    */
   async uploadFile(filePath, fileName, folderId, mimeType = null) {
     try {
@@ -124,6 +158,30 @@ class GoogleDriveService {
       };
     } catch (error) {
       console.error('Error uploading edited version:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create version folder and upload edited video FROM BUFFER (MEMORY STORAGE)
+   */
+  async uploadEditedVersionFromBuffer(buffer, fileName, projectFolderId, version) {
+    try {
+      // Find or create the "Edited Versions" folder
+      const editedVersionsFolder = await this.findOrCreateEditedVersionsFolder(projectFolderId);
+      
+      // Create version folder (v1, v2, etc.)
+      const versionFolder = await this.createFolder(`v${version}`, editedVersionsFolder.id);
+      
+      // Upload the edited video to the version folder from buffer
+      const uploadedFile = await this.uploadFileFromBuffer(buffer, fileName, versionFolder.id);
+
+      return {
+        versionFolder,
+        uploadedFile
+      };
+    } catch (error) {
+      console.error('Error uploading edited version from buffer:', error);
       throw error;
     }
   }
@@ -279,7 +337,53 @@ class GoogleDriveService {
   }
 
   /**
-   * Upload voice message to Google Drive
+   * Upload voice message from buffer (no local storage)
+   */
+  async uploadVoiceMessageFromBuffer(buffer, fileName, folderId) {
+    try {
+      const fileMetadata = {
+        name: fileName,
+        parents: [folderId]
+      };
+
+      const media = {
+        mimeType: 'audio/webm', // Common format for web audio recordings
+        body: buffer
+      };
+
+      const file = await this.drive.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id, name, webViewLink, size'
+      });
+
+      // Make file publicly accessible
+      await this.drive.permissions.create({
+        fileId: file.data.id,
+        resource: {
+          role: 'reader',
+          type: 'anyone'
+        }
+      });
+
+      // Get direct download link
+      const downloadLink = `https://drive.google.com/uc?id=${file.data.id}`;
+
+      return {
+        id: file.data.id,
+        name: file.data.name,
+        webViewLink: file.data.webViewLink,
+        downloadLink: downloadLink,
+        size: file.data.size
+      };
+    } catch (error) {
+      console.error('Error uploading voice message buffer:', error);
+      throw new Error('Failed to upload voice message buffer to Google Drive');
+    }
+  }
+
+  /**
+   * Upload voice message to Google Drive (backward compatibility)
    */
   async uploadVoiceMessage(filePath, fileName, folderId) {
     try {
