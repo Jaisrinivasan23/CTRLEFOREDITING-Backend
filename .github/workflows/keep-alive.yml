@@ -1,0 +1,35 @@
+name: Keep Server Alive
+
+on:
+  schedule:
+    # Runs every 14 minutes to prevent Render free tier sleep
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Ping server to keep it alive
+        run: |
+          echo "🏓 Pinging server to prevent sleep..."
+          response=$(curl -s -w "%{http_code}" https://ctrleforediting-backend.onrender.com/keep-alive)
+          
+          if [ "${response: -3}" = "200" ]; then
+            echo "✅ Server is alive and responding"
+            echo "Response: ${response%???}"
+          else
+            echo "❌ Server issue - Response code: ${response: -3}"
+            exit 1
+          fi
+      
+      - name: Check health endpoint
+        run: |
+          echo "🔍 Checking health endpoint..."
+          curl -s https://ctrleforediting-backend.onrender.com/health | jq '.'
+      
+      - name: Log keep-alive stats
+        run: |
+          echo "📊 Getting keep-alive statistics..."
+          curl -s https://ctrleforediting-backend.onrender.com/keep-alive-stats | jq '.'

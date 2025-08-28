@@ -6,6 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { createDefaultAdmin } = require('./utils/helpers');
+const keepAliveService = require('./services/keepAliveService');
 require('dotenv').config();
 
 console.log('🚀 Starting Ctrl E CRM Server...');
@@ -125,6 +126,31 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Keep-alive endpoint for external monitoring
+app.get('/keep-alive', (req, res) => {
+  res.status(200).json({
+    status: 'ALIVE',
+    message: 'Server is awake and running',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    memory: {
+      used: Math.round(process.memoryUsage().rss / 1024 / 1024) + ' MB',
+      heap: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB'
+    },
+    lastKeepAlive: new Date().toLocaleString()
+  });
+});
+
+// Ping endpoint for simple monitoring
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
+// Keep-alive stats endpoint
+app.get('/keep-alive-stats', (req, res) => {
+  res.status(200).json(keepAliveService.getStats());
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -166,7 +192,13 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 Server accessible at: http://0.0.0.0:${PORT}`);
   if (process.env.NODE_ENV === 'production') {
-    console.log(`🔗 Production URL: https://your-app-name.onrender.com`);
+    console.log(`🔗 Production URL: https://ctrleforediting-backend.onrender.com`);
+    
+    // Start keep-alive service in production
+    setTimeout(() => {
+      console.log('🚀 Starting keep-alive service for unlimited uptime...');
+      keepAliveService.start();
+    }, 5000); // Start after 5 seconds
   }
 });
 
@@ -174,3 +206,22 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 server.timeout = 0; // Disable timeout for file uploads to Google Drive
 server.keepAliveTimeout = 0; // Disable keep-alive timeout
 server.headersTimeout = 0; // Disable headers timeout
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  keepAliveService.stop();
+  server.close(() => {
+    console.log('✅ Process terminated');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  keepAliveService.stop();
+  server.close(() => {
+    console.log('✅ Process terminated');
+    process.exit(0);
+  });
+});
