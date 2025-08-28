@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 
 class GoogleDriveService {
   constructor() {
@@ -81,9 +82,14 @@ class GoogleDriveService {
         parents: [folderId]
       };
 
+      // Convert buffer to readable stream
+      const bufferStream = new Readable();
+      bufferStream.push(buffer);
+      bufferStream.push(null); // End the stream
+
       const media = {
         mimeType: mimeType || 'application/octet-stream',
-        body: buffer
+        body: bufferStream
       };
 
       const file = await this.drive.files.create({
@@ -346,9 +352,14 @@ class GoogleDriveService {
         parents: [folderId]
       };
 
+      // Convert buffer to readable stream
+      const bufferStream = new Readable();
+      bufferStream.push(buffer);
+      bufferStream.push(null); // End the stream
+
       const media = {
         mimeType: 'audio/webm', // Common format for web audio recordings
-        body: buffer
+        body: bufferStream
       };
 
       const file = await this.drive.files.create({
