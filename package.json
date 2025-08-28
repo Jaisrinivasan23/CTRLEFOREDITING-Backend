@@ -6,6 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "build": "echo 'No build step required for Node.js backend'",
+    "deploy": "node scripts/deploy.js",
+    "deploy:minor": "node scripts/deploy.js minor",
+    "deploy:major": "node scripts/deploy.js major",
     "test": "jest",
     "lint": "eslint src/"
   },
