@@ -25,7 +25,7 @@ function deploy(versionType = 'patch') {
     
     // Push to trigger auto-deploy on Render
     console.log('🔄 Pushing to GitHub (triggers Render deployment)...');
-    execSync('git push origin main', { stdio: 'inherit' });
+    execSync('git push origin master', { stdio: 'inherit' });
     
     console.log('\n✅ Deployment initiated successfully!');
     console.log(`🎉 Version ${newVersion} has been pushed to GitHub`);
@@ -39,7 +39,7 @@ function deploy(versionType = 'patch') {
     console.error('\n❌ Deployment failed:', error.message);
     console.log('\n🔧 Troubleshooting tips:');
     console.log('   1. Make sure you have uncommitted changes');
-    console.log('   2. Check if you\'re on the correct branch (main)');
+    console.log('   2. Check if you\'re on the correct branch (master)');
     console.log('   3. Ensure you have push permissions to the repository');
     console.log('   4. Verify your git remote is set correctly');
     process.exit(1);
